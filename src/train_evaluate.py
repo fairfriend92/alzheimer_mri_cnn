@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns   # Used to plot heatmap
 import pandas as pd
 import json # Used to access patients dataset 
+import torchio as tio # Used to trasnform MRI volumes 
 import os
 import sys 
 
@@ -205,9 +206,20 @@ if __name__ == "__main__":
         download_oasis(n_discs=my_n_discs)
         preprocess_all(n_discs=my_n_discs)
     
-    # Create torch dataste 
+    # Trasnformatio to apply online during training.
+    # (In each epoch the transformation changes slightly).
+    my_transform = tio.Compose([
+    tio.RandomFlip(axes=('LR',), flip_probability=0.5),
+    tio.RandomAffine(scales=(0.9, 1.1),
+                     degrees=10,
+                     translation=5),
+    tio.RandomNoise(mean=0, std=0.05),
+    tio.RandomGamma(log_gamma=(-0.3, 0.3)),
+])
+    
+    # Create torch dataset  
     X, y = load_dataset("./data/processed", "./data/processed/dataset.json")
-    dataset = OasisDataset(X, y)
+    dataset = OasisDataset(X, y, my_transform)
     
     # Split dataset into train and test 
     train_size = int(0.8 * len(dataset))
