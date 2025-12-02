@@ -5,76 +5,19 @@ import seaborn as sns   # Used to plot heatmap
 import pandas as pd
 import json # Used to access patients dataset 
 import torchio as tio # Used to trasnform MRI volumes 
+from collections import Counter
 import os
 import sys 
 
 from data_download import download_oasis
 from preprocessing import preprocess_all
+from neural_networks import Simple3DCNN, Complex3DCNN
 
 from pathlib import Path
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
-
-class Simple3DCNN(nn.Module):
-    def __init__(self, input_shape=(128,128,128)):
-        super().__init__()
-        D,H,W = input_shape
-        
-        '''
-            nn.Conv3d(in_channels, out_channels, kernel_size padding)
-            
-            In the OASIS dataset, MRI images have 1 channel: T1, i.e.
-            relaxation time of tissues after a radiofrequency pulse. 
-            
-            Padding formula:            
-            out_size = (in_size+2*padding-kernel_size)/stride+1
-            If stride=1 and we want out_size=in_size=128:
-            2*padding = kernel_size-1 -> padding = (kernel_size-1)/2
-            
-            By default, padding values are 0. 
-        '''
-                
-        self.conv1 = nn.Conv3d(1, 8, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv3d(8, 16, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv3d(16, 32, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv3d(32, 64, kernel_size=3, padding=1)
-        
-        '''
-            MaxPool3d(kernel_size, stride=None, padding=0)
-            If stride=None, stride_size will be the same as kernel_size.
-            Choosing kernel_size=2 thus slices input dimension in half.
-        '''
-        
-        self.pool  = nn.MaxPool3d(2)
-
-        '''
-            Fully connected layer. 
-            The input has 64 channels from the last convolution, 
-            with spatial dimensions reduced by two maxpoolings (divided by 4). 
-            The output has 128 neurons.
-        '''
-        
-        self.fc1 = nn.Linear(64*(D//4)*(H//4)*(W//4), 128)
-        self.fc2 = nn.Linear(128, 2)  # output: 2 classes 
-
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-
-        '''
-            fc needs a 2d input: (batch_size, num_features).
-            After cnn, x has shape (batch_size, channels, D, H, W).
-            Thus we must flatten x.
-        '''
-
-        x = x.view(x.size(0), -1) # x is a torch tensor: x.size(0) is always batch_size 
-        x = F.relu(self.fc1(x))
-        return self.fc2(x)
 
 class OasisDataset(Dataset):
     def __init__(self, volumes, labels, transform=None):
@@ -122,11 +65,14 @@ def load_dataset(processed_dir, dataset_file):
     #y = np.array(y)  
     return X, y
         
-def train_evaluate(train_loader, test_loader):
+def train_evaluate(train_loader, test_loader, nn_type='complex'):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    # Move model to device 
-    model = Simple3DCNN().to(device)
+    # Move model to device
+    if nn_type == 'simple': 
+      model = Simple3DCNN().to(device)
+    elif nn_type == 'complex':
+      model = Complex3DCNN().to(device)
     
     criterion = nn.CrossEntropyLoss()
     
@@ -206,16 +152,12 @@ if __name__ == "__main__":
         download_oasis(n_discs=my_n_discs)
         preprocess_all(n_discs=my_n_discs)
     
-    # Trasnformatio to apply online during training.
+    # Trasnformation to apply online during training.
     # (In each epoch the transformation changes slightly).
     my_transform = tio.Compose([
-    tio.RandomFlip(axes=('LR',), flip_probability=0.5),
-    tio.RandomAffine(scales=(0.9, 1.1),
-                     degrees=10,
-                     translation=5),
-    tio.RandomNoise(mean=0, std=0.05),
-    tio.RandomGamma(log_gamma=(-0.3, 0.3)),
-])
+      tio.RandomAffine(scales=(0.9, 1.1), degrees=5),
+      tio.RandomNoise(mean=0, std=0.01)
+    ])
     
     # Create torch dataset  
     X, y = load_dataset("./data/processed", "./data/processed/dataset.json")
@@ -226,6 +168,12 @@ if __name__ == "__main__":
     test_size  = len(dataset) - train_size
     train_ds, test_ds = random_split(dataset, [train_size, test_size])
     train_loader = DataLoader(train_ds, batch_size=2, shuffle=True) 
-    test_loader  = DataLoader(test_ds, batch_size=2)  # batch_size: number of volumes sent to the model at once 
+    # batch_size: number of volumes sent to the model at once 
+    test_loader  = DataLoader(test_ds, batch_size=2)  
+
+    # Check if training dataset i balanced
+    train_labels = [int(dataset[i][1]) for i in train_ds.indices]  # dataset[i] = (volume, label)
+    counter = Counter(train_labels)
+    print(f'Train labels:{counter}')
 
     train_evaluate(train_loader, test_loader)
