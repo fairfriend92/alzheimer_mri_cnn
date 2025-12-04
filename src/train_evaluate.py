@@ -144,11 +144,11 @@ def train_evaluate(train_loader, test_loader, nn_type='complex'):
     print("Accuracy:", correct / total)
 
 if __name__ == "__main__": 
+    ''' Parse arguements '''
+    
     parser = argparse.ArgumentParser()
-    parser.add_argument('-s', '--simple_nn', action='store_true', 
-                        help='Use simple neural network model')
-    parser.add_argument('-c', '--complex_nn', action='store_true', 
-                        help='Use complex neural network model')
+    parser.add_argument('-n', '--net_type', type=str, default=None, 
+                        help='Type of network to use')
     parser.add_argument('-t', '--transform', action='store_true', 
                         help='Transform training data')
     parser.add_argument('-d', '--discs', type=int, default=None, 
@@ -160,8 +160,8 @@ if __name__ == "__main__":
     if args.discs is None:
         print("No --discs argument, default=5 used")
         args.discs = 5
-    if args.discs > 12:
-        print("OASIS only has 12 discs. 5 discs will be downloaded.") 
+    if args.discs > 12 or args.discs < 1:
+        print("OASIS has 12 discs. 5 discs will be downloaded.") 
         args.discs = 5
         
     download_oasis(n_discs=args.discs)
@@ -169,13 +169,19 @@ if __name__ == "__main__":
     
     # Trasnformation to apply online during training.
     # (In each epoch the transformation changes slightly).
-
+    my_transform = None 
     
     if args.trasnform is not None:
       my_transform = tio.Compose([
         tio.RandomAffine(scales=(0.9, 1.1), degrees=5),
         tio.RandomNoise(mean=0, std=0.01)
       ])
+    
+    if args.net_type is None or (args.net_type != 'simple' and args.net_type != 'complex'):
+        print("Using complex type neural network")
+        args.net_type = 'complex'
+      
+    ''' Prepare dataset and start training '''  
     
     # Create torch dataset  
     X, y = load_dataset("./data/processed", "./data/processed/dataset.json")
@@ -194,4 +200,4 @@ if __name__ == "__main__":
     counter = Counter(train_labels)
     print(f'Train labels:{counter}')
 
-    train_evaluate(train_loader, test_loader)
+    train_evaluate(train_loader, test_loader, args.net_type)
