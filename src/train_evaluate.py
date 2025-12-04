@@ -5,6 +5,7 @@ import seaborn as sns   # Used to plot heatmap
 import pandas as pd
 import json # Used to access patients dataset 
 import torchio as tio # Used to trasnform MRI volumes 
+import argparse
 from collections import Counter
 import os
 import sys 
@@ -143,21 +144,38 @@ def train_evaluate(train_loader, test_loader, nn_type='complex'):
     print("Accuracy:", correct / total)
 
 if __name__ == "__main__": 
-    my_n_discs = None
-    if len(sys.argv) > 1:
-        my_n_discs = int(sys.argv[1])
-        my_n_discs = min(12, my_n_discs) # Oasis has only 12 discs of data 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--simple_nn', action='store_true', 
+                        help='Use simple neural network model')
+    parser.add_argument('-c', '--complex_nn', action='store_true', 
+                        help='Use complex neural network model')
+    parser.add_argument('-t', '--transform', action='store_true', 
+                        help='Transform training data')
+    parser.add_argument('-d', '--discs', type=int, default=None, 
+                        help='Number of OASIS discs to download')
+    args = parser.parse_args()
+
+    n_discs = args.discs  
+
+    if args.discs is None:
+        print("No --discs argument, default=5 used")
+        args.discs = 5
+    if args.discs > 12:
+        print("OASIS only has 12 discs. 5 discs will be downloaded.") 
+        args.discs = 5
         
-    if my_n_discs is not None and my_n_discs > 0:    
-        download_oasis(n_discs=my_n_discs)
-        preprocess_all(n_discs=my_n_discs)
+    download_oasis(n_discs=args.discs)
+    preprocess_all(n_discs=args.discs)
     
     # Trasnformation to apply online during training.
     # (In each epoch the transformation changes slightly).
-    my_transform = tio.Compose([
-      tio.RandomAffine(scales=(0.9, 1.1), degrees=5),
-      tio.RandomNoise(mean=0, std=0.01)
-    ])
+
+    
+    if args.trasnform is not None:
+      my_transform = tio.Compose([
+        tio.RandomAffine(scales=(0.9, 1.1), degrees=5),
+        tio.RandomNoise(mean=0, std=0.01)
+      ])
     
     # Create torch dataset  
     X, y = load_dataset("./data/processed", "./data/processed/dataset.json")
