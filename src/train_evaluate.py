@@ -158,7 +158,7 @@ if __name__ == "__main__":
     n_discs = args.discs  
 
     if args.discs is None:
-        print("No --discs argument, default=5 used")
+        print("No --discs argument, default=5 used.")
         args.discs = 5
     if args.discs > 12 or args.discs < 1:
         print("OASIS has 12 discs. 5 discs will be downloaded.") 
@@ -171,18 +171,19 @@ if __name__ == "__main__":
     # (In each epoch the transformation changes slightly).
     my_transform = None 
     
-    if args.transform is not None:
-      print("Using transformation on training dataset")
+    if args.transform:
+      print("Using transformation on training dataset.")
       my_transform = tio.Compose([
         tio.RandomAffine(scales=(0.9, 1.1), degrees=5),
         tio.RandomNoise(mean=0, std=0.01)
       ])
     else:
-        print("No transformation will be performed on the training dataset")
+        print("No transformation will be performed on the training dataset.")
     
     if args.net_type is None or (args.net_type != 'simple' and args.net_type != 'complex'):
-        print("Using complex type neural network")
+        print("No network type specified.")
         args.net_type = 'complex'
+    print(f"Using {args.net_type} network type.")
       
     ''' Prepare dataset and start training '''  
     

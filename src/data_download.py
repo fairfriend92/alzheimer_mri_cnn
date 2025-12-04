@@ -14,7 +14,7 @@ def download_oasis(destination=Path("./data/raw"), n_discs=2):
         if archive_path.exists():
             print(f"Archive {disc_id} already downloaded.")
         else:
-            print(f"Downloading OASIS {disc_id} dataset")
+            print(f"Downloading OASIS {disc_id} dataset...")
             try:
                 urllib.request.urlretrieve(url, archive_path)
                 print("Download complete.")
