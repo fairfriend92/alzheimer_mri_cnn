@@ -2,10 +2,16 @@ import urllib.request
 import tarfile
 from pathlib import Path
 
-def download_oasis(destination=Path("./data/raw"), n_discs=2):   
+def download_oasis(destination=Path("./data/raw"), processed_dir=Path("./data/processed"), n_discs=2):   
     destination.mkdir(parents=True, exist_ok=True)
     
-    for disc_id in range(1, n_discs+1):        
+    for disc_id in range(1, n_discs+1):      
+        # If this disc is already fully processed, skip download
+        done_file = processed_dir / f"disc{disc_id}.done"
+        if done_file.exists():
+            print(f"disc{disc_id} already processed, skipping download.")
+            continue
+        
         # This file contains several preprocessed MRI scans (~1.3 GB)
         url = "https://download.nrg.wustl.edu/data/oasis_cross-sectional_"+f"disc{disc_id}.tar.gz"
 

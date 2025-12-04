@@ -7,6 +7,7 @@ from pathlib import Path
 from scipy.ndimage import zoom
 from tqdm import tqdm # Used to show progress bar when analyzing subjects 
 import json # Used to save patient dataset
+import shutil # Used to cleanup raw directory after preprocessing
 
 '''
     Reads from the patient profile the CDR value
@@ -89,59 +90,78 @@ def preprocess_volume(volume, target_shape=(128, 128, 128)):
 def preprocess_all(n_discs=2, data_raw_dir="./data/raw/", processed_dir="./data/processed"):
     os.makedirs(processed_dir, exist_ok=True)
     
+    dataset = []
+    
     subjects = []
     for disc_id in range(1, n_discs+1):
-        disc_dir = os.path.join(data_raw_dir, f"disc{disc_id}")
-        subjects.extend(sorted([d for d in Path(disc_dir).glob("OAS1_*") if d.is_dir()]))
+        disc_done = Path(processed_dir) / f"disc{disc_id}.done"                
+        disc_dir = Path(data_raw_dir) / f"disc{disc_id}"
         
-    dataset = []
+        subjects = sorted([d for d in Path(disc_dir).glob("OAS1_*") if d.is_dir()])            
 
-    for subject_dir in tqdm(subjects, desc="Processing subjects"):
-        session_name = subject_dir.name  # Ex. OAS1_0039_MR1
-        txt_path = subject_dir / f"{session_name}.txt"
-        
-        out_path = Path(processed_dir) / f"{session_name}.npy"
-        
-        # Parse metadata to get label
-        label = parse_metadata(txt_path)
-        if label is None:
-            #print(f"\nCouldn't extract label for patient {session_name}")
-            continue
-        
-        # Add entry to dataset index
-        dataset.append({
-            "id": session_name,
-            "path": str(out_path),
-            "label": label
-        })
-        
-        # Skip data already preprocessed 
-        if out_path.exists():           
-            continue
+        for subject_dir in tqdm(subjects, desc=f"Processing subjects from disc{disc_id}"):
+            session_name = subject_dir.name  # Ex. OAS1_0039_MR1
+            txt_path = subject_dir / f"{session_name}.txt"
+            
+            out_path = Path(processed_dir) / f"{session_name}.npy"
+            
+            # Parse metadata to get label
+            label = parse_metadata(txt_path)
+            if label is None:
+                #print(f"\nCouldn't extract label for patient {session_name}")
+                continue
+            
+            # Add entry to dataset index
+            dataset.append({
+                "id": session_name,
+                "path": str(out_path),
+                "label": label
+            })
+            
+            # Skip data already preprocessed 
+            if disc_done.exists():
+                print(f"disc{disc_id} already fully processed, skipping.")
+                continue
 
-        if not txt_path.exists():
-            print(f"\nCouldn't find the txt file for patient {session_name}")
-            continue
+            if not txt_path.exists():
+                print(f"\nCouldn't find the txt file for patient {session_name}")
+                continue
 
-        # RAW folder
-        raw_dir = subject_dir / "RAW"
-        if not raw_dir.exists():
-            print(f"\nCouldn't find raw folder for patient {session_name}")
-            continue
+            # RAW folder
+            raw_dir = subject_dir / "RAW"
+            if not raw_dir.exists():
+                print(f"\nCouldn't find raw folder for patient {session_name}")
+                continue
 
-        # Load HDR volume
-        volume = load_hdr_volume(raw_dir)
-        if volume is None:
-            print(f"\nCouldn't load hdr volume for patient {session_name}")
-            continue
+            # Load HDR volume
+            volume = load_hdr_volume(raw_dir)
+            if volume is None:
+                print(f"\nCouldn't load hdr volume for patient {session_name}")
+                continue
 
-        # Save preprocessed volume 
-        np.save(out_path, preprocess_volume(volume))
+            # Save preprocessed volume 
+            np.save(out_path, preprocess_volume(volume))
+            
+        # Mark the disc as processed
+        disc_done.touch()
+                    
+        # Cleanup of raw files 
+        disc_dir = Path(data_raw_dir) / f"disc{disc_id}"
+            
+        # Remove raw directory
+        if disc_dir.exists():
+            shutil.rmtree(disc_dir)
 
+        # Remove the .tar.gz archive
+        archive_path = Path(data_raw_dir) / f"oasis_{disc_id}.tar.gz" 
+        if archive_path.exists():
+            archive_path.unlink()
+            
+            
     # Save dataset.json
     with open(Path(processed_dir) / "dataset.json", "w") as f:
         json.dump(dataset, f, indent=2)
-
+        
     print(f"Done! Saved {len(dataset)} subjects.")
 
 
