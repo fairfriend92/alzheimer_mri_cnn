@@ -2,6 +2,9 @@ import os
 import re
 import numpy as np
 import nibabel as nib # Used to open .hdr volumes 
+
+from data_download import download_oasis
+
 from glob import glob # Used to match characters when looking up files/dir 
 from pathlib import Path
 from scipy.ndimage import zoom
@@ -87,16 +90,29 @@ def preprocess_volume(volume, target_shape=(128, 128, 128)):
     
     return volume_resampled
 
-def preprocess_all(n_discs=2, data_raw_dir="./data/raw/", processed_dir="./data/processed"):
+def preprocess_all(n_discs=2, data_raw_dir="./data/raw", processed_dir="./data/processed"):
     os.makedirs(processed_dir, exist_ok=True)
     
-    dataset = []
+    dataset_final = []
     
     subjects = []
-    for disc_id in range(1, n_discs+1):
-        disc_done = Path(processed_dir) / f"disc{disc_id}.done"                
-        disc_dir = Path(data_raw_dir) / f"disc{disc_id}"
+    for disc_id in range(1, n_discs+1):        
+        disc_dataset_path = Path(processed_dir) / f"disc{disc_id}.json"   
+        disc_dataset = []
         
+        # Skip data already preprocessed 
+        if disc_dataset_path.exists():
+            with open(disc_dataset_path, "r") as f:
+                disc_dataset = json.load(f)
+                                
+            dataset_final.extend(disc_dataset) 
+            
+            print(f"disc{disc_id} already fully processed, skipping.")
+            continue
+            
+        download_oasis(disc_id, Path(data_raw_dir))
+        
+        disc_dir = Path(data_raw_dir) / f"disc{disc_id}"        
         subjects = sorted([d for d in Path(disc_dir).glob("OAS1_*") if d.is_dir()])            
 
         for subject_dir in tqdm(subjects, desc=f"Processing subjects from disc{disc_id}"):
@@ -112,17 +128,12 @@ def preprocess_all(n_discs=2, data_raw_dir="./data/raw/", processed_dir="./data/
                 continue
             
             # Add entry to dataset index
-            dataset.append({
+            disc_dataset.append({
                 "id": session_name,
                 "path": str(out_path),
                 "label": label
-            })
+            })            
             
-            # Skip data already preprocessed 
-            if disc_done.exists():
-                print(f"disc{disc_id} already fully processed, skipping.")
-                continue
-
             if not txt_path.exists():
                 print(f"\nCouldn't find the txt file for patient {session_name}")
                 continue
@@ -141,28 +152,22 @@ def preprocess_all(n_discs=2, data_raw_dir="./data/raw/", processed_dir="./data/
 
             # Save preprocessed volume 
             np.save(out_path, preprocess_volume(volume))
+
+        dataset_final.extend(disc_dataset)
             
-        # Mark the disc as processed
-        disc_done.touch()
+        # Save partial dataset
+        with open(disc_dataset_path, "w") as f:
+            json.dump(disc_dataset, f, indent=2)
                     
         # Cleanup of raw files 
-        disc_dir = Path(data_raw_dir) / f"disc{disc_id}"
-            
-        # Remove raw directory
         if disc_dir.exists():
             shutil.rmtree(disc_dir)
-
-        # Remove the .tar.gz archive
-        archive_path = Path(data_raw_dir) / f"oasis_{disc_id}.tar.gz" 
-        if archive_path.exists():
-            archive_path.unlink()
-            
             
     # Save dataset.json
     with open(Path(processed_dir) / "dataset.json", "w") as f:
-        json.dump(dataset, f, indent=2)
+        json.dump(dataset_final, f, indent=2)
         
-    print(f"Done! Saved {len(dataset)} subjects.")
+    print(f"Done! Saved {len(dataset_final)} subjects.")
 
 
 if __name__ == "__main__":

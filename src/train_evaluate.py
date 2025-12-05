@@ -10,7 +10,6 @@ from collections import Counter
 import os
 import sys 
 
-from data_download import download_oasis
 from preprocessing import preprocess_all
 from neural_networks import Simple3DCNN, Complex3DCNN
 
@@ -164,7 +163,6 @@ if __name__ == "__main__":
         print("OASIS has 12 discs. 5 discs will be downloaded.") 
         args.discs = 5
         
-    download_oasis(n_discs=args.discs)
     preprocess_all(n_discs=args.discs)
     
     # Trasnformation to apply online during training.
