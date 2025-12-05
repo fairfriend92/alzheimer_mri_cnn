@@ -67,9 +67,7 @@ def load_hdr_volume(subject_raw_dir):
     Normalize and resample the 3D volume.
 '''
 def preprocess_volume(volume, target_shape=(128, 128, 128)):
-    # Normalize intensity
     volume = volume.astype(np.float32)
-    volume = (volume - np.mean(volume)) / (np.std(volume) + 1e-6)
 
     # Move channel dimension in the 1st first place
     # to satisfy torch requirements. 
@@ -87,6 +85,10 @@ def preprocess_volume(volume, target_shape=(128, 128, 128)):
         target_shape[2] / volume.shape[3],
     )
     volume_resampled = zoom(volume, zoom_factors)
+
+    # Normalize intensity
+    volume_resampled = (volume_resampled - np.mean(volume_resampled)) / (
+                        np.std(volume_resampled) + 1e-6)
     
     return volume_resampled
 

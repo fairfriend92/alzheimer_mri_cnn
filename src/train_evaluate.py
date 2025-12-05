@@ -11,19 +11,23 @@ import os
 import sys 
 
 from preprocessing import preprocess_all
-from neural_networks import Simple3DCNN, Complex3DCNN
+from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
 
 from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split, WeightedRandomSampler
+
 
 class OasisDataset(Dataset):
     def __init__(self, volumes, labels, transform=None):
         self.volumes = volumes
         self.labels = labels
         self.transform = transform
+        self.class_counts = [labels.count(0), labels.count(1)]
+        self.weights = 1. / torch.tensor(self.class_counts, dtype=torch.float)
+        self.sample_weights = [self.weights[label] for label in labels]
 
     def __len__(self):
         return len(self.volumes)
@@ -73,6 +77,8 @@ def train_evaluate(train_loader, test_loader, nn_type='complex'):
       model = Simple3DCNN().to(device)
     elif nn_type == 'complex':
       model = Complex3DCNN().to(device)
+    elif nn_type == 'medium':
+      model = Medium3DCNN().to(device)
     
     criterion = nn.CrossEntropyLoss()
     
@@ -178,7 +184,10 @@ if __name__ == "__main__":
     else:
         print("No transformation will be performed on the training dataset.")
     
-    if args.net_type is None or (args.net_type != 'simple' and args.net_type != 'complex'):
+    incorrect_type = (args.net_type != 'simple' and 
+                      args.net_type != 'complex' and 
+                      args.net_type != 'medium')
+    if args.net_type is None or incorrect_type:
         print("No network type specified.")
         args.net_type = 'complex'
     print(f"Using {args.net_type} network type.")
@@ -193,8 +202,19 @@ if __name__ == "__main__":
     train_size = int(0.8 * len(dataset))
     test_size  = len(dataset) - train_size
     train_ds, test_ds = random_split(dataset, [train_size, test_size])
+
+    # Balance num of samples for each class
+    train_indices = train_ds.indices  
+    train_sample_weights = [dataset.sample_weights[i] for i in train_indices]
+
+    train_sampler = WeightedRandomSampler(
+        weights=train_sample_weights,
+        num_samples=len(train_sample_weights),
+        replacement=True
+    )
+
+    # Load train a test dataset 
     train_loader = DataLoader(train_ds, batch_size=2, shuffle=True) 
-    # batch_size: number of volumes sent to the model at once 
     test_loader  = DataLoader(test_ds, batch_size=2)  
 
     # Check if training dataset i balanced

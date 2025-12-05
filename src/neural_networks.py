@@ -41,12 +41,6 @@ class Complex3DCNN(nn.Module):
         '''
         
         self.fc1 = nn.Linear(64*(D//4)*(H//4)*(W//4), 128)
-
-        '''
-            Dropout(p)
-            During training, zeros some of the elements of the input tensor 
-            with probability p.
-        '''
         self.fc2 = nn.Linear(128, 2)  # output: 2 classes 
 
     def forward(self, x):        
@@ -93,4 +87,27 @@ class Simple3DCNN(nn.Module):
         x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
+        return self.fc2(x)
+
+class Medium3DCNN(nn.Module):
+    def __init__(self, input_shape=(128,128,128)):
+        super().__init__()
+        D,H,W = input_shape                
+        self.conv1 = nn.Conv3d(1, 8, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv3d(8, 16, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv3d(16, 32, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv3d(32, 64, kernel_size=3, padding=1)        
+        self.pool  = nn.MaxPool3d(2) 
+        self.global_pool = nn.AdaptiveAvgPool3d((4,4,4))       
+        self.fc1 = nn.Linear(64*4*4*4, 128)
+        self.fc2 = nn.Linear(128, 2)  # output: 2 classes 
+
+    def forward(self, x):        
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.conv4(x))  
+        x = self.global_pool(x)      
+        x = x.view(x.size(0), -1) 
+        x = F.relu(self.fc1(x))
         return self.fc2(x)
