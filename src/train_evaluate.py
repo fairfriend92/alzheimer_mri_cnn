@@ -11,6 +11,7 @@ import os
 import sys 
 
 from preprocessing import preprocess_all
+from util import update_args_from_file
 from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
 
 from pathlib import Path
@@ -156,25 +157,30 @@ if __name__ == "__main__":
                         help='Type of network to use')
     parser.add_argument('-t', '--transform', action='store_true', 
                         help='Transform training data')
+    parser.add_argument('-s', '--sampler', action='store_true', 
+                        help='Sample training data')
     parser.add_argument('-d', '--discs', type=int, default=None, 
                         help='Number of OASIS discs to download')
+    parser.add_argument('-i', '--input', type=str, default=None, 
+                        help='Read input file')
     args = parser.parse_args()
 
-    n_discs = args.discs  
+    # Read arguements from input file
+    if args.input is not None:
+      print(f"Reading arguements from file {args.input}.txt")
+      update_args_from_file(args)
 
+    # Read number of discs
     if args.discs is None:
         print("No --discs argument, default=5 used.")
         args.discs = 5
     if args.discs > 12 or args.discs < 1:
         print("OASIS has 12 discs. 5 discs will be downloaded.") 
         args.discs = 5
-        
-    preprocess_all(n_discs=args.discs)
-    
+
     # Trasnformation to apply online during training.
     # (In each epoch the transformation changes slightly).
-    my_transform = None 
-    
+    my_transform = None     
     if args.transform:
       print("Using transformation on training dataset.")
       my_transform = tio.Compose([
@@ -183,7 +189,8 @@ if __name__ == "__main__":
       ])
     else:
         print("No transformation will be performed on the training dataset.")
-    
+
+    # Read neural network model to be used 
     incorrect_type = (args.net_type != 'simple' and 
                       args.net_type != 'complex' and 
                       args.net_type != 'medium')
@@ -191,6 +198,10 @@ if __name__ == "__main__":
         print("No network type specified.")
         args.net_type = 'complex'
     print(f"Using {args.net_type} network type.")
+
+    ''' Preprocess dataset '''
+
+    preprocess_all(n_discs=args.discs)
       
     ''' Prepare dataset and start training '''  
     
@@ -204,15 +215,21 @@ if __name__ == "__main__":
     train_ds, test_ds = random_split(dataset, [train_size, test_size])
 
     # Balance num of samples for each class
-    train_indices = train_ds.indices  
-    train_sample_weights = [dataset.sample_weights[i] for i in train_indices]
+    if args.sampler:
+      print("Using sampling on training dataset.")
+      train_indices = train_ds.indices  
+      train_sample_weights = [dataset.sample_weights[i] for i in train_indices]
+      
+      train_sampler = WeightedRandomSampler(
+          weights=train_sample_weights,
+          num_samples=len(train_sample_weights),
+          replacement=True
+      )
 
-    train_sampler = WeightedRandomSampler(
-        weights=train_sample_weights,
-        num_samples=len(train_sample_weights),
-        replacement=True
-    )
-
+      train_loader = DataLoader(train_ds, batch_size=2, shuffle=True) 
+    else:
+        print("No sampling will be performed on the training dataset.")
+    
     # Load train a test dataset 
     train_loader = DataLoader(train_ds, batch_size=2, shuffle=True) 
     test_loader  = DataLoader(test_ds, batch_size=2)  
