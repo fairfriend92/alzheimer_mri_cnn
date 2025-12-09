@@ -128,13 +128,6 @@ def preprocess_all(n_discs=2, data_raw_dir="./data/raw", processed_dir="./data/p
                 #print(f"\nCouldn't extract label for patient {session_name}")
                 continue
             
-            # Add entry to dataset index
-            disc_dataset.append({
-                "id": session_name,
-                "path": str(out_path),
-                "label": label
-            })            
-            
             if not txt_path.exists():
                 print(f"\nCouldn't find the txt file for patient {session_name}")
                 continue
@@ -150,6 +143,13 @@ def preprocess_all(n_discs=2, data_raw_dir="./data/raw", processed_dir="./data/p
             if volume is None:
                 print(f"\nCouldn't load hdr volume for patient {session_name}")
                 continue
+
+            # Add entry to dataset index
+            disc_dataset.append({
+                "id": session_name,
+                "path": str(out_path),
+                "label": label
+            })  
 
             # Save preprocessed volume 
             np.save(out_path, preprocess_volume(volume))
