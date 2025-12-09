@@ -1,4 +1,6 @@
 from pathlib import Path
+from collections import Counter
+import itertools
 import ast
 
 def update_args_from_file(args):   
@@ -22,3 +24,11 @@ def update_args_from_file(args):
     except FileNotFoundError:
       print(f"{file_path} does not exist. Using default arguements.")
     return args
+
+def check_sampler(train_loader, n_batches=200):
+    cnt = Counter()
+    for i, (_, y) in enumerate(train_loader):
+        cnt.update([int(v) for v in y])
+        if i + 1 >= n_batches:
+            break
+    return cnt

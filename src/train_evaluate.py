@@ -11,7 +11,7 @@ import os
 import sys 
 
 from preprocessing import preprocess_all
-from util import update_args_from_file
+from util import update_args_from_file, check_sampler
 from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
 
 from pathlib import Path
@@ -27,7 +27,9 @@ class OasisDataset(Dataset):
         self.labels = labels
         self.transform = transform
         self.class_counts = [labels.count(0), labels.count(1)]
-        self.weights = 1. / torch.tensor(self.class_counts, dtype=torch.float)
+        self.counts = torch.tensor(self.class_counts, dtype=torch.float)
+        self.weights = 1. / self.counts
+        self.norm_weights = self.counts.sum() / self.counts # Normalized weights
         self.sample_weights = [self.weights[label] for label in labels]
 
     def __len__(self):
@@ -70,18 +72,24 @@ def load_dataset(processed_dir, dataset_file):
     #y = np.array(y)  
     return X, y
         
-def train_evaluate(train_loader, test_loader, nn_type='complex'):
+def train_evaluate(train_loader, test_loader, dataset, args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Move class weights to device (OASIS dataset is not balanced)
+    class_weights = dataset.norm_weights.to(device)
     
     # Move model to device
-    if nn_type == 'simple': 
+    if args.net_type == 'simple': 
       model = Simple3DCNN().to(device)
-    elif nn_type == 'complex':
+    elif args.net_type == 'complex':
       model = Complex3DCNN().to(device)
-    elif nn_type == 'medium':
+    elif args.net_type == 'medium':
       model = Medium3DCNN().to(device)
     
-    criterion = nn.CrossEntropyLoss()
+    if args.sampler:
+      criterion = nn.CrossEntropyLoss(weight=class_weights)
+    else:
+      criterion = nn.CrossEntropyLoss()
     
     # Update parameters with backpropagation. lr: learning rate
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -214,7 +222,7 @@ if __name__ == "__main__":
     test_size  = len(dataset) - train_size
     train_ds, test_ds = random_split(dataset, [train_size, test_size])
 
-    # Balance num of samples for each class
+    # Balance num of samples for each class and load train dataset
     if args.sampler:
       print("Using sampling on training dataset.")
       train_indices = train_ds.indices  
@@ -226,17 +234,22 @@ if __name__ == "__main__":
           replacement=True
       )
 
-      train_loader = DataLoader(train_ds, batch_size=2, shuffle=True) 
+      train_loader = DataLoader(train_ds, batch_size=2, sampler=train_sampler) 
     else:
-        print("No sampling will be performed on the training dataset.")
+      print("No sampling will be performed on the training dataset.")
+      train_loader = DataLoader(train_ds, batch_size=2, shuffle=True)
     
-    # Load train a test dataset 
-    train_loader = DataLoader(train_ds, batch_size=2, shuffle=True) 
+    # Load test dataset      
     test_loader  = DataLoader(test_ds, batch_size=2)  
 
-    # Check if training dataset i balanced
+    # Check counts for each class in training dataset
     train_labels = [int(dataset[i][1]) for i in train_ds.indices]  # dataset[i] = (volume, label)
     counter = Counter(train_labels)
     print(f'Train labels:{counter}')
 
-    train_evaluate(train_loader, test_loader, args.net_type)
+    # Check counts for each class in batch if sampler is used
+    if args.sampler:
+      batch_cnt = check_sampler(train_loader)
+      print(f'Batch labels:{batch_cnt}')
+
+    train_evaluate(train_loader, test_loader, dataset, args)

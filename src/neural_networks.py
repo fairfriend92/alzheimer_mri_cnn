@@ -98,8 +98,8 @@ class Medium3DCNN(nn.Module):
         self.conv3 = nn.Conv3d(16, 32, kernel_size=3, padding=1)
         self.conv4 = nn.Conv3d(32, 64, kernel_size=3, padding=1)        
         self.pool  = nn.MaxPool3d(2) 
-        self.global_pool = nn.AdaptiveAvgPool3d((4,4,4))       
-        self.fc1 = nn.Linear(64*4*4*4, 128)
+        self.global_pool = nn.AdaptiveAvgPool3d((16,16,16))       
+        self.fc1 = nn.Linear(64*16*16*16, 128)
         self.fc2 = nn.Linear(128, 2)  # output: 2 classes 
 
     def forward(self, x):        

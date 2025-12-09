@@ -1,0 +1,4 @@
+discs 12
+net_type medium
+transform False
+sampler True

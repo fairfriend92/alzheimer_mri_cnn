@@ -33,13 +33,12 @@ def parse_metadata(txt_path):
         return None  # Missing value
 
     cdr = float(cdr_str)
-    '''
-        Usually Alzheimer is indicated by CDR = 1.
-        Intermediate values such greater and equal
-        to CDR = 0.5 will be considered early onset 
-        and will be assigned the same label.
-    '''
-    label = 1 if cdr >= 0.5 else 0  
+    if cdr == 1:
+      label = 1
+    elif cdr == 0:
+      label = 0
+    else:
+      label = None
     return label
 
 '''
