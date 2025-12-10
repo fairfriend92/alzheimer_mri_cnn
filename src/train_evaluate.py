@@ -1,3 +1,6 @@
+''' General imports '''
+import os
+import sys 
 import numpy as np
 import joblib   # Used to save models 
 import matplotlib.pyplot as plt
@@ -7,18 +10,16 @@ import json # Used to access patients dataset
 import torchio as tio # Used to trasnform MRI volumes 
 import argparse
 from collections import Counter
-import os
-import sys 
-
-from preprocessing import preprocess_all
-from util import update_args_from_file, check_sampler
-from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
-
 from pathlib import Path
-
+''' My imports '''
+from preprocessing import preprocess_all
+from util import update_args_from_file, check_sampler, plot_figs
+from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
+''' ML imports '''
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split, WeightedRandomSampler
+from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score
 
 
 class OasisDataset(Dataset):
@@ -138,6 +139,7 @@ def train_evaluate(train_loader, test_loader, dataset, args):
     correct = 0
     total = 0
 
+    labels, preds, probs = [], [], []
     with torch.no_grad(): # Stop computation of gradients to avoid memory waste 
         for vol, label in test_loader:
             vol = vol.to(device)
@@ -155,7 +157,16 @@ def train_evaluate(train_loader, test_loader, dataset, args):
             correct += (pred == label).sum().item()
             total += label.size(0)
 
+            labels += label.cpu().tolist()
+            preds += pred.cpu().tolist()
+            probs += torch.softmax(output, dim=1)[:, 1].cpu().tolist()
+
+    # Print metrics 
     print("Accuracy:", correct / total)
+    print(classification_report(labels, preds, digits=3))
+    auc_score = roc_auc_score(labels, probs)
+    print(f"AUC: {auc_score:.3f}")
+    plot_figs(labels, preds, probs, auc_score)
 
 if __name__ == "__main__": 
     ''' Parse arguements '''
