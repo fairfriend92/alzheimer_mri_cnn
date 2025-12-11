@@ -225,6 +225,8 @@ if __name__ == "__main__":
                         help='Type of network to use')
     parser.add_argument('-t', '--transform', action='store_true', 
                         help='Transform training data')
+    parser.add_argument('-a', '--augment', type=str, default=None, 
+                        help='Augment minor class with trasformations')
     parser.add_argument('-k', '--kfolds', type=int, default=None, 
                         help='Use stratified K fold')
     parser.add_argument('-s', '--sampler', action='store_true', 
@@ -274,8 +276,45 @@ if __name__ == "__main__":
       
     ''' Prepare dataset and start training '''      
     # Create torch dataset  
-    X, y = load_dataset("./data/processed", "./data/processed/dataset.json")
-    dataset = OasisDataset(X, y, my_transform)
+    volumes, labels = load_dataset("./data/processed", 
+                                   "./data/processed/dataset.json")
+
+    # Augment dataset if needed                                 
+    if args.augment is not None and args.augment > 0:
+      print("Augmenting dataset with transformations...")
+      # Create transformation used to augment dataset
+      minor_transform = tio.Compose([
+          tio.RandomAffine(scales=(0.95,1.05), degrees=10),
+          tio.RandomFlip(axes=(0,)),        
+          tio.RandomElasticDeformation(num_control_points=7, max_displacement=2.0),
+          tio.RandomNoise(std=0.02),
+          tio.RandomBiasField(),
+      ])
+
+      aug_vols, aug_labels = list(volumes), list(labels)
+      # Idx of minor class' labels
+      minor_idx = [i for i,l in enumerate(labels) if l==1] 
+      rep_factor = args.augment
+
+      # Apply trasformations to each sample of the minor class
+      done = 0
+      for i in minor_idx:
+          pct = 100 * done / len(minor_idx)
+          print(f"\rProgress: {pct:6.2f}%", end="")
+          
+          vol = torch.tensor(volumes[i], dtype=torch.float32)
+          for _ in range(rep_factor):
+              img = tio.ScalarImage(tensor=vol)  
+              aug = minor_transform(img)
+              aug_vol = aug.data.numpy()[0] # Retrieve numpy
+              aug_vols.append(aug_vol)
+              aug_labels.append(1)
+
+          done = done + 1
+
+      dataset = OasisDataset(aug_vols, aug_labels, my_transform)      
+    else:
+      dataset = OasisDataset(volumes, labels, my_transform)
 
     # Split dataset into train and test...   
     if args.kfolds is None or args.kfolds <= 0:
@@ -288,7 +327,7 @@ if __name__ == "__main__":
       print(f"Using stratified k folds with k={args.kfolds}")
       skf = StratifiedKFold(n_splits=args.kfolds, shuffle=True, random_state=42)
       all_folds_metrics = []
-      for fold, (train_idx, test_idx) in enumerate(skf.split(X, y)):
+      for fold, (train_idx, test_idx) in enumerate(skf.split(volumes, labels)):
           print(f"\n===== FOLD {fold+1} =====")
           
           train_ds = Subset(dataset, train_idx)
