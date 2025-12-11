@@ -11,16 +11,21 @@ import torchio as tio # Used to trasnform MRI volumes
 import argparse
 from collections import Counter
 from pathlib import Path
+from datetime import datetime # Used to name the output folder
+
 ''' My imports '''
 from preprocessing import preprocess_all
-from util import update_args_from_file, check_sampler, plot_figs
+from util import (update_args_from_file, check_sampler, 
+                  plot_figs, compute_avg_fold_metrics)
 from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
+
 ''' ML imports '''
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, random_split, WeightedRandomSampler
+from torch.utils.data import (Dataset, DataLoader, random_split, 
+                              WeightedRandomSampler, Subset)
 from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score
-
+from sklearn.model_selection import StratifiedKFold
 
 class OasisDataset(Dataset):
     def __init__(self, volumes, labels, transform=None):
@@ -73,7 +78,7 @@ def load_dataset(processed_dir, dataset_file):
     #y = np.array(y)  
     return X, y
         
-def train_evaluate(train_loader, test_loader, dataset, args):
+def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Move class weights to device (OASIS dataset is not balanced)
@@ -162,20 +167,66 @@ def train_evaluate(train_loader, test_loader, dataset, args):
             probs += torch.softmax(output, dim=1)[:, 1].cpu().tolist()
 
     # Print metrics 
-    print("Accuracy:", correct / total)
-    print(classification_report(labels, preds, digits=3))
+    accuracy = correct / total
+    report = classification_report(labels, preds, digits=3, output_dict=True)
     auc_score = roc_auc_score(labels, probs)
+    print("Accuracy:", accuracy)
     print(f"AUC: {auc_score:.3f}")
-    plot_figs(labels, preds, probs, auc_score)
+    print(classification_report(labels, preds, digits=3))    
+
+    plot_figs(labels, preds, probs, auc_score, timestamp, fold=fold)
+
+    return {
+        "accuracy": accuracy,
+        "classification_report": report,
+        "auc": auc_score,
+        "fold": -1 if fold is None else fold+1
+    }
+
+def launch_training(args, train_ds, test_ds, dataset, timestamp, fold=None):
+  # Balance num of samples for each class and load train dataset
+  if args.sampler:
+    print("Using sampling on training dataset.")
+    train_indices = train_ds.indices  
+    train_sample_weights = [dataset.sample_weights[i] for i in train_indices]
+    
+    train_sampler = WeightedRandomSampler(
+        weights=train_sample_weights,
+        num_samples=len(train_sample_weights),
+        replacement=True
+    )
+
+    train_loader = DataLoader(train_ds, batch_size=2, sampler=train_sampler) 
+  else:
+    print("No sampling will be performed on the training dataset.")
+    train_loader = DataLoader(train_ds, batch_size=2, shuffle=True)
+  
+  # Load test dataset      
+  test_loader  = DataLoader(test_ds, batch_size=2)  
+
+  # Check counts for each class in training dataset
+  train_labels = [int(dataset[i][1]) for i in train_ds.indices]  # dataset[i] = (volume, label)
+  counter = Counter(train_labels)
+  print(f'Train labels:{counter}')
+
+  # Check counts for each class in batch if sampler is used
+  if args.sampler:
+    batch_cnt = check_sampler(train_loader)
+    print(f'Batch labels:{batch_cnt}')
+
+  return train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold)
 
 if __name__ == "__main__": 
-    ''' Parse arguements '''
-    
+    timestamp = datetime.now().strftime("%d_%m_%Y_%H_%M")
+
+    ''' Parse arguements '''    
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--net_type', type=str, default=None, 
                         help='Type of network to use')
     parser.add_argument('-t', '--transform', action='store_true', 
                         help='Transform training data')
+    parser.add_argument('-k', '--kfolds', type=int, default=None, 
+                        help='Use stratified K fold')
     parser.add_argument('-s', '--sampler', action='store_true', 
                         help='Sample training data')
     parser.add_argument('-d', '--discs', type=int, default=None, 
@@ -219,48 +270,31 @@ if __name__ == "__main__":
     print(f"Using {args.net_type} network type.")
 
     ''' Preprocess dataset '''
-
     preprocess_all(n_discs=args.discs)
       
-    ''' Prepare dataset and start training '''  
-    
+    ''' Prepare dataset and start training '''      
     # Create torch dataset  
     X, y = load_dataset("./data/processed", "./data/processed/dataset.json")
     dataset = OasisDataset(X, y, my_transform)
-    
-    # Split dataset into train and test 
-    train_size = int(0.8 * len(dataset))
-    test_size  = len(dataset) - train_size
-    train_ds, test_ds = random_split(dataset, [train_size, test_size])
 
-    # Balance num of samples for each class and load train dataset
-    if args.sampler:
-      print("Using sampling on training dataset.")
-      train_indices = train_ds.indices  
-      train_sample_weights = [dataset.sample_weights[i] for i in train_indices]
-      
-      train_sampler = WeightedRandomSampler(
-          weights=train_sample_weights,
-          num_samples=len(train_sample_weights),
-          replacement=True
-      )
-
-      train_loader = DataLoader(train_ds, batch_size=2, sampler=train_sampler) 
+    # Split dataset into train and test...   
+    if args.kfolds is None or args.kfolds <= 0:
+      train_size = int(0.8 * len(dataset))
+      test_size  = len(dataset) - train_size
+      train_ds, test_ds = random_split(dataset, [train_size, test_size])
+      launch_training(args, train_ds, test_ds, dataset, timestamp)
+    #...or use stratified K fold
     else:
-      print("No sampling will be performed on the training dataset.")
-      train_loader = DataLoader(train_ds, batch_size=2, shuffle=True)
+      print(f"Using stratified k folds with k={args.kfolds}")
+      skf = StratifiedKFold(n_splits=args.kfolds, shuffle=True, random_state=42)
+      all_folds_metrics = []
+      for fold, (train_idx, test_idx) in enumerate(skf.split(X, y)):
+          print(f"\n===== FOLD {fold+1} =====")
+          
+          train_ds = Subset(dataset, train_idx)
+          test_ds  = Subset(dataset, test_idx)
+          fold_metrics = launch_training(args, train_ds, test_ds, dataset, timestamp, fold)
+          all_folds_metrics.append(fold_metrics)
+      compute_avg_fold_metrics(all_folds_metrics, timestamp)
+
     
-    # Load test dataset      
-    test_loader  = DataLoader(test_ds, batch_size=2)  
-
-    # Check counts for each class in training dataset
-    train_labels = [int(dataset[i][1]) for i in train_ds.indices]  # dataset[i] = (volume, label)
-    counter = Counter(train_labels)
-    print(f'Train labels:{counter}')
-
-    # Check counts for each class in batch if sampler is used
-    if args.sampler:
-      batch_cnt = check_sampler(train_loader)
-      print(f'Batch labels:{batch_cnt}')
-
-    train_evaluate(train_loader, test_loader, dataset, args)
