@@ -1,12 +1,10 @@
 ''' General imports '''
-import os
 import sys 
 import numpy as np
 import joblib   # Used to save models 
 import matplotlib.pyplot as plt
 import seaborn as sns   # Used to plot heatmap
 import pandas as pd
-import json # Used to access patients dataset 
 import torchio as tio # Used to trasnform MRI volumes 
 import argparse
 from collections import Counter
@@ -14,6 +12,7 @@ from pathlib import Path
 from datetime import datetime # Used to name the output folder
 
 ''' My imports '''
+from oasis_dataset import OasisDataset, load_dataset
 from preprocessing import preprocess_all
 from util import (update_args_from_file, check_sampler, 
                   plot_figs, compute_avg_fold_metrics)
@@ -22,62 +21,11 @@ from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
 ''' ML imports '''
 import torch
 import torch.nn as nn
-from torch.utils.data import (Dataset, DataLoader, random_split, 
+from torch.utils.data import (DataLoader, random_split, 
                               WeightedRandomSampler, Subset)
 from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
-class OasisDataset(Dataset):
-    def __init__(self, volumes, labels, transform=None):
-        self.volumes = volumes
-        self.labels = labels
-        self.transform = transform
-        self.class_counts = [labels.count(0), labels.count(1)]
-        self.counts = torch.tensor(self.class_counts, dtype=torch.float)
-        self.weights = 1. / self.counts
-        self.norm_weights = self.counts.sum() / self.counts # Normalized weights
-        self.sample_weights = [self.weights[label] for label in labels]
-
-    def __len__(self):
-        return len(self.volumes)
-
-    def __getitem__(self, idx):
-        vol = torch.tensor(self.volumes[idx], dtype=torch.float32)
-
-        if self.transform:
-            vol = self.transform(vol)
-
-        label = torch.tensor(self.labels[idx], dtype=torch.long)
-        return vol, label
-        
-def load_dataset(processed_dir, dataset_file):
-    print("Loading dataset...")
-    
-    try:
-        with open(dataset_file) as f:
-            dataset = json.load(f)
-    except FileNotFoundError:
-        print(f"Error: {dataset_file} not found")
-        sys.exit(1)  
-
-    X = []
-    y = []
-
-    for dict in dataset:
-        subject_id = dict["id"]        
-        npy_file = os.path.join(processed_dir, f"{subject_id}.npy")
-        try:
-            volume = np.load(npy_file)
-        except FileNotFoundError:
-            print(f"Error: {npy_file} not found")
-            sys.exit(1)        
-        X.append(volume)
-        y.append(dict["label"])
-    
-    #X = np.array(X)  
-    #y = np.array(y)  
-    return X, y
-        
 def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -154,11 +102,11 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
             
             # Choose classes with highes logit 
             pred = output.argmax(dim=1)
-            
+            '''
             print("Output:", output)
             print("Pred:", pred)
             print("Label:", label)
-
+            '''
             correct += (pred == label).sum().item()
             total += label.size(0)
 
@@ -196,7 +144,7 @@ def launch_training(args, train_ds, test_ds, dataset, timestamp, fold=None):
         replacement=True
     )
 
-    train_loader = DataLoader(train_ds, batch_size=2, sampler=train_sampler) 
+    train_loader = DataLoader(train_ds, batch_size=2, sampler=train_sampler, shuffle=False) 
   else:
     print("No sampling will be performed on the training dataset.")
     train_loader = DataLoader(train_ds, batch_size=2, shuffle=True)
@@ -225,7 +173,7 @@ if __name__ == "__main__":
                         help='Type of network to use')
     parser.add_argument('-t', '--transform', action='store_true', 
                         help='Transform training data')
-    parser.add_argument('-a', '--augment', type=str, default=None, 
+    parser.add_argument('-a', '--augment', type=int, default=None, 
                         help='Augment minor class with trasformations')
     parser.add_argument('-k', '--kfolds', type=int, default=None, 
                         help='Use stratified K fold')
@@ -291,7 +239,6 @@ if __name__ == "__main__":
           tio.RandomBiasField(),
       ])
 
-      aug_vols, aug_labels = list(volumes), list(labels)
       # Idx of minor class' labels
       minor_idx = [i for i,l in enumerate(labels) if l==1] 
       rep_factor = args.augment
@@ -306,15 +253,13 @@ if __name__ == "__main__":
           for _ in range(rep_factor):
               img = tio.ScalarImage(tensor=vol)  
               aug = minor_transform(img)
-              aug_vol = aug.data.numpy()[0] # Retrieve numpy
-              aug_vols.append(aug_vol)
-              aug_labels.append(1)
+              aug_vol = aug.data.numpy() # Retrieve numpy
+              volumes.append(aug_vol)
+              labels.append(1)
 
           done = done + 1
-
-      dataset = OasisDataset(aug_vols, aug_labels, my_transform)      
-    else:
-      dataset = OasisDataset(volumes, labels, my_transform)
+    
+    dataset = OasisDataset(volumes, labels, my_transform)
 
     # Split dataset into train and test...   
     if args.kfolds is None or args.kfolds <= 0:
@@ -324,7 +269,7 @@ if __name__ == "__main__":
       launch_training(args, train_ds, test_ds, dataset, timestamp)
     #...or use stratified K fold
     else:
-      print(f"Using stratified k folds with k={args.kfolds}")
+      print(f"\nUsing stratified k folds with k={args.kfolds}.")
       skf = StratifiedKFold(n_splits=args.kfolds, shuffle=True, random_state=42)
       all_folds_metrics = []
       for fold, (train_idx, test_idx) in enumerate(skf.split(volumes, labels)):
