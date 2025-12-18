@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime # Used to name the output folder
 
 ''' My imports '''
-from oasis_dataset import OasisDataset, load_dataset
+from oasis_dataset import OasisDataset, load_dataset, augment_dataset
 from preprocessing import preprocess_all
 from util import (update_args_from_file, check_sampler, 
                   plot_figs, compute_avg_fold_metrics)
@@ -134,7 +134,7 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
 def launch_training(args, train_ds, test_ds, dataset, timestamp, fold=None):
   # Balance num of samples for each class and load train dataset
   if args.sampler:
-    print("Using sampling on training dataset.")
+    print("\nUsing sampling on training dataset.")
     train_indices = train_ds.indices  
     train_sample_weights = [dataset.sample_weights[i] for i in train_indices]
     
@@ -146,19 +146,18 @@ def launch_training(args, train_ds, test_ds, dataset, timestamp, fold=None):
 
     train_loader = DataLoader(train_ds, batch_size=2, sampler=train_sampler, shuffle=False) 
   else:
-    print("No sampling will be performed on the training dataset.")
+    print("\nNo sampling will be performed on the training dataset.")
     train_loader = DataLoader(train_ds, batch_size=2, shuffle=True)
   
   # Load test dataset      
   test_loader  = DataLoader(test_ds, batch_size=2)  
 
-  # Check counts for each class in training dataset
-  train_labels = [int(dataset[i][1]) for i in train_ds.indices]  # dataset[i] = (volume, label)
-  counter = Counter(train_labels)
-  print(f'Train labels:{counter}')
-
-  # Check counts for each class in batch if sampler is used
+  # Check counts for each class if sampler is used
   if args.sampler:
+    train_labels = [int(dataset[i][1]) for i in train_ds.indices]  # dataset[i] = (volume, label)
+    counter = Counter(train_labels)
+    print(f'Train labels:{counter}')
+
     batch_cnt = check_sampler(train_loader)
     print(f'Batch labels:{batch_cnt}')
 
@@ -175,6 +174,8 @@ if __name__ == "__main__":
                         help='Transform training data')
     parser.add_argument('-a', '--augment', type=int, default=None, 
                         help='Augment minor class with trasformations')
+    parser.add_argument('-at', '--aug_test', action='store_true', 
+                        help='Augment test dataset')
     parser.add_argument('-k', '--kfolds', type=int, default=None, 
                         help='Use stratified K fold')
     parser.add_argument('-s', '--sampler', action='store_true', 
@@ -189,6 +190,10 @@ if __name__ == "__main__":
     if args.input is not None:
       print(f"Reading arguements from file {args.input}.txt")
       update_args_from_file(args)
+
+    if args.sampler and args.augment is not None:
+      print("Cannot sample and augment at the same time, exiting.")
+      sys.exit()
 
     # Read number of discs
     if args.discs is None:
@@ -225,40 +230,7 @@ if __name__ == "__main__":
     ''' Prepare dataset and start training '''      
     # Create torch dataset  
     volumes, labels = load_dataset("./data/processed", 
-                                   "./data/processed/dataset.json")
-
-    # Augment dataset if needed                                 
-    if args.augment is not None and args.augment > 0:
-      print("Augmenting dataset with transformations...")
-      # Create transformation used to augment dataset
-      minor_transform = tio.Compose([
-          tio.RandomAffine(scales=(0.95,1.05), degrees=10),
-          tio.RandomFlip(axes=(0,)),        
-          tio.RandomElasticDeformation(num_control_points=7, max_displacement=2.0),
-          tio.RandomNoise(std=0.02),
-          tio.RandomBiasField(),
-      ])
-
-      # Idx of minor class' labels
-      minor_idx = [i for i,l in enumerate(labels) if l==1] 
-      rep_factor = args.augment
-
-      # Apply trasformations to each sample of the minor class
-      done = 0
-      for i in minor_idx:
-          pct = 100 * done / len(minor_idx)
-          print(f"\rProgress: {pct:6.2f}%", end="")
-          
-          vol = torch.tensor(volumes[i], dtype=torch.float32)
-          for _ in range(rep_factor):
-              img = tio.ScalarImage(tensor=vol)  
-              aug = minor_transform(img)
-              aug_vol = aug.data.numpy() # Retrieve numpy
-              volumes.append(aug_vol)
-              labels.append(1)
-
-          done = done + 1
-    
+                                   "./data/processed/dataset.json")    
     dataset = OasisDataset(volumes, labels, my_transform)
 
     # Split dataset into train and test...   
@@ -266,6 +238,17 @@ if __name__ == "__main__":
       train_size = int(0.8 * len(dataset))
       test_size  = len(dataset) - train_size
       train_ds, test_ds = random_split(dataset, [train_size, test_size])
+
+      train_idx = train_ds.indices
+      test_idx  = test_ds.indices
+
+      # Augment dataset if needed
+      if args.augment and args.augment > 0:
+        aug_ds = augment_dataset(volumes, labels, train_idx, test_idx, 
+                                 args.augment, my_transform, args.aug_test)
+        train_ds = aug_ds[0]
+        if args.aug_test: test_ds = aug_ds[1]
+
       launch_training(args, train_ds, test_ds, dataset, timestamp)
     #...or use stratified K fold
     else:
@@ -274,9 +257,16 @@ if __name__ == "__main__":
       all_folds_metrics = []
       for fold, (train_idx, test_idx) in enumerate(skf.split(volumes, labels)):
           print(f"\n===== FOLD {fold+1} =====")
-          
+
           train_ds = Subset(dataset, train_idx)
           test_ds  = Subset(dataset, test_idx)
+          
+          if args.augment and args.augment > 0:
+            aug_ds = augment_dataset(volumes, labels, train_idx, test_idx, 
+                                     args.augment, my_transform, args.aug_test)
+            train_ds = aug_ds[0]
+            if args.aug_test: test_ds = aug_ds[1]
+            
           fold_metrics = launch_training(args, train_ds, test_ds, dataset, timestamp, fold)
           all_folds_metrics.append(fold_metrics)
       compute_avg_fold_metrics(all_folds_metrics, timestamp)

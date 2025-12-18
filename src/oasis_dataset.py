@@ -3,6 +3,7 @@ import os
 import json # Used to access patients dataset 
 import numpy as np
 import torch
+import torchio as tio
 from torch.utils.data import Dataset
 
 class OasisDataset(Dataset):
@@ -55,4 +56,51 @@ def load_dataset(processed_dir, dataset_file):
     #X = np.array(X)  
     #y = np.array(y)  
     return X, y
+
+def augment_dataset(volumes, labels, train_idx, test_idx, num_copies, 
+                    base_transform=None, aug_test=True):
+  if aug_test:
+    print("Augmenting training and test datasets with transformation.")
+  else:
+    print("Augmenting training dataset with transformation.")
+
+  # Create transformation used to augment dataset
+  minor_transform = tio.Compose([
+      tio.RandomAffine(scales=(0.95,1.05), degrees=10),
+      tio.RandomFlip(axes=(0,)),
+      tio.RandomElasticDeformation(num_control_points=7, max_displacement=2.0),
+      tio.RandomNoise(std=0.02),
+      tio.RandomBiasField(),
+  ])
+
+  if aug_test:
+    aug_idx = [train_idx, test_idx]
+  else:
+    aug_idx = [train_idx]
+
+  aug_ds = []
+
+  # Apply trasformations to each sample of the minor class
+  for idx in aug_idx:
+    # Idx of minor class' labels
+    minor_idx = [i for i in idx if labels[i] == 1]
+
+    aug_vols = [volumes[i] for i in idx]
+    aug_labels = [labels[i]  for i in idx]
+
+    done = 0
+    for i in minor_idx:
+        pct = 100 * done / len(minor_idx) 
+        print(f"\rProgress: {pct:6.2f}%", end="")
+        vol = torch.tensor(volumes[i], dtype=torch.float32)
+        for _ in range(num_copies):
+            img = tio.ScalarImage(tensor=vol)
+            aug = minor_transform(img)
+            aug_vols.append(aug.data.numpy()) # Retrieve numpy
+            aug_labels.append(1)
+        done = done + 1
+
+    aug_ds.append(OasisDataset(aug_vols, aug_labels, base_transform))
+
+  return aug_ds
         

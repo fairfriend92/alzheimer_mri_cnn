@@ -1,0 +1,7 @@
+discs 12
+kfolds 5
+augment 5
+aug_test True
+net_type medium
+transform False
+sampler False
