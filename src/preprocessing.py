@@ -5,9 +5,11 @@ import nibabel as nib # Used to open .hdr volumes
 
 from data_download import download_oasis
 
+import sqlite3
 from glob import glob # Used to match characters when looking up files/dir 
 from pathlib import Path
 from scipy.ndimage import zoom
+from scipy.stats import entropy
 from tqdm import tqdm # Used to show progress bar when analyzing subjects 
 import json # Used to save patient dataset
 import shutil # Used to cleanup raw directory after preprocessing
@@ -91,6 +93,110 @@ def preprocess_volume(volume, target_shape=(128, 128, 128)):
     
     return volume_resampled
 
+def build_database(dataset_json="./data/processed/dataset.json",
+                   db_path="./data/processed/oasis.db"):
+    print("Creating database...")
+    conn = sqlite3.connect(db_path)
+
+    # Create tables 
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS patients (
+        patient_id TEXT PRIMARY KEY,
+        label INTEGER,
+        cdr REAL,
+        disc INTEGER
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS volumes (
+        patient_id TEXT PRIMARY KEY,
+        path TEXT,
+        shape_x INTEGER,
+        shape_y INTEGER,
+        shape_z INTEGER,
+        mean REAL,
+        std REAL,
+        min REAL,
+        max REAL,
+        p1 REAL,
+        p99 REAL,
+        entropy REAL,
+        FOREIGN KEY(patient_id) REFERENCES patients(patient_id)
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS predictions (
+        patient_id TEXT,
+        model_name TEXT,
+        prob_ad REAL,
+        predicted_label INTEGER,
+        FOREIGN KEY(patient_id) REFERENCES patients(patient_id)
+    );
+    """)
+
+    conn.commit()
+
+    with open(dataset_json, "r") as f:
+        dataset = json.load(f)
+
+    for entry in dataset:
+        patient_id = entry["id"]
+        label = entry["label"]
+        path = Path(entry["path"])
+        disc = 1 if "disc1" in path.as_posix() else 2
+
+        volume = np.load(path)
+
+        # Extract volume features
+        v = volume.flatten()
+        features = {
+            "mean": float(np.mean(v)),
+            "std": float(np.std(v)),
+            "min": float(np.min(v)),
+            "max": float(np.max(v)),
+            "p1": float(np.percentile(v, 1)),
+            "p99": float(np.percentile(v, 99)),
+            "entropy": float(entropy(np.histogram(v, bins=256)[0] + 1e-8)),
+            "shape_x": int(volume.shape[1]),
+            "shape_y": int(volume.shape[2]),
+            "shape_z": int(volume.shape[3]),
+        }
+
+        # Insert patient
+        cursor.execute("""
+        INSERT OR IGNORE INTO patients
+        (patient_id, label, cdr, disc)
+        VALUES (?, ?, ?, ?);
+        """, (patient_id, label, label, disc))  # cdr = label (0/1)
+
+        # Insert volume
+        cursor.execute("""
+        INSERT OR REPLACE INTO volumes
+        (patient_id, path, shape_x, shape_y, shape_z,
+         mean, std, min, max, p1, p99, entropy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (
+            patient_id,
+            str(path),
+            features["shape_x"],
+            features["shape_y"],
+            features["shape_z"],
+            features["mean"],
+            features["std"],
+            features["min"],
+            features["max"],
+            features["p1"],
+            features["p99"],
+            features["entropy"]
+        ))
+
+    conn.commit()
+    conn.close()
+    print("Database built successfully.")
+
 def preprocess_all(n_discs=2, data_raw_dir="./data/raw", processed_dir="./data/processed"):
     os.makedirs(processed_dir, exist_ok=True)
     
@@ -169,7 +275,7 @@ def preprocess_all(n_discs=2, data_raw_dir="./data/raw", processed_dir="./data/p
         json.dump(dataset_final, f, indent=2)
         
     print(f"Done! Saved {len(dataset_final)} subjects.")
-
+    build_database()
 
 if __name__ == "__main__":
     preprocess_all()
