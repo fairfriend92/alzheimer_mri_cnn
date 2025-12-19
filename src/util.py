@@ -33,6 +33,14 @@ def update_args_from_file(args):
       print(f"{file_path} does not exist. Using default arguements.")
     return args
 
+# Save arguements to file
+def save_args_to_file(args, timestamp, outputs_path='./outputs'):
+  final_path = f'{outputs_path}/{timestamp}/params.txt'
+
+  with open(final_path, "w") as f:
+      for key, value in vars(args).items():
+          f.write(f"{key} {value}\n")
+
 # Check if batch is balanced after sampling
 def check_sampler(train_loader, n_batches=200):
     cnt = Counter()

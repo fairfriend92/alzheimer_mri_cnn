@@ -15,7 +15,7 @@ from datetime import datetime # Used to name the output folder
 from oasis_dataset import OasisDataset, load_dataset, augment_dataset
 from preprocessing import preprocess_all
 from util import (update_args_from_file, check_sampler, 
-                  plot_figs, compute_avg_fold_metrics)
+                  plot_figs, compute_avg_fold_metrics, save_args_to_file)
 from neural_networks import Simple3DCNN, Complex3DCNN, Medium3DCNN
 
 ''' ML imports '''
@@ -190,6 +190,9 @@ if __name__ == "__main__":
     if args.input is not None:
       print(f"Reading arguements from file {args.input}.txt")
       update_args_from_file(args)
+
+    # Save arguements to file in output folder for safekeeping 
+    save_args_to_file(args, timestamp)
 
     if args.sampler and args.augment is not None:
       print("Cannot sample and augment at the same time, exiting.")
