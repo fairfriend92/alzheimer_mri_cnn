@@ -7,7 +7,9 @@ import seaborn as sns   # Used to plot heatmap
 import pandas as pd
 import torchio as tio # Used to trasnform MRI volumes 
 import argparse
+import sqlite3
 from collections import Counter
+from collections import defaultdict # Dict that stores probs for each patient ID
 from pathlib import Path
 from datetime import datetime # Used to name the output folder
 
@@ -26,7 +28,8 @@ from torch.utils.data import (DataLoader, random_split,
 from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
-def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=None):
+def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=None,
+                   db_path = "data/processed/oasis.db"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Move class weights to device (OASIS dataset is not balanced)
@@ -56,7 +59,7 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
         model.train() # Enable train mode (useful for dropout and batch normalization)
         total_loss = 0
 
-        for vol, label in train_loader:
+        for vol, label, patient_id in train_loader:
             # Move batch to device 
             vol = vol.to(device)
             label = label.to(device)
@@ -87,41 +90,82 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
         print(f"Epoch {epoch+1}, Loss = {total_loss/len(train_loader):.4f}")
         
     print("Evaluating...")
-        
-    model.eval() # Enable evaluation mode (disable dropout and batch normalization)
-    correct = 0
-    total = 0
 
-    labels, preds, probs = [], [], []
+    # Enable evaluation mode (disable dropout and batch normalization)    
+    model.eval() 
+
+    # Dictionary of lists that store probs for each patient id to do test-time augmentation (TTA)
+    patient_probs = defaultdict(list)
+
+    # Dictionary to store label for each patient id 
+    patient_labels = {}
+
     with torch.no_grad(): # Stop computation of gradients to avoid memory waste 
-        for vol, label in test_loader:
+        for vol, label, patient_id in test_loader:
             vol = vol.to(device)
             label = label.to(device)
-
             output = model(vol)
-            
-            # Choose classes with highes logit 
-            pred = output.argmax(dim=1)
-            '''
-            print("Output:", output)
-            print("Pred:", pred)
-            print("Label:", label)
-            '''
-            correct += (pred == label).sum().item()
-            total += label.size(0)
 
-            labels += label.cpu().tolist()
-            preds += pred.cpu().tolist()
-            probs += torch.softmax(output, dim=1)[:, 1].cpu().tolist()
+            # Compute prob for Alzheimer's Disease and predict class
+            prob_ad = torch.softmax(output, dim=1)[:, 1].item
+            pred = int(prob_ad > 0.5)
+
+            # Save in the dictionary the prob and label for this patient
+            patient_probs[patient_id].append(prob_ad)
+            patient_labels[patient_id] = label.item()
+
+    # Dictionaries where mean TTA probs and preds are saved
+    final_probs, final_preds = {}, {}
+
+    # Compute mean TTA probs and preds
+    for patient_id, probs in patient_probs.items():
+        mean_prob = sum(probs) / len(probs)
+        final_probs[patient_id] = mean_prob
+        final_preds[patient_id] = int(mean_prob > 0.5)
+
+    # Connect to database to save predictions and probabilities
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Counters for correct and total predictions
+    correct, total = 0, 0
+
+    # Lists for all labels, preds and probs  
+    labels, preds, probs = [], [], []
+
+    for pid in final_probs:
+      # Count correct predictions
+      if final_preds[pid] == patient_labels[pid]:
+            correct += 1
+      total += 1
+
+      # Store label, prob and pred
+      labels.append(patient_labels[pid])
+      probs.append(final_probs[pid])
+      preds.append(final_preds[pid])
+
+      # Save to database 
+      cursor.execute("""
+          INSERT OR REPLACE INTO predictions
+          (patient_id, model_name, prob_ad, predicted_label)
+          VALUES (?, ?, ?, ?)
+      """, (pid, f"{args.net_type}_cnn", final_probs[pid], final_preds[pid]))
+
+    # Compute accuracy
+    accuracy = correct / total
+
+    # Close connection to database 
+    conn.commit()
+    conn.close() 
 
     # Print metrics 
-    accuracy = correct / total
     report = classification_report(labels, preds, digits=3, output_dict=True)
     auc_score = roc_auc_score(labels, probs)
     print("Accuracy:", accuracy)
     print(f"AUC: {auc_score:.3f}")
     print(classification_report(labels, preds, digits=3))    
 
+    # Plot figures
     plot_figs(labels, preds, probs, auc_score, timestamp, fold=fold)
 
     return {
@@ -232,9 +276,9 @@ if __name__ == "__main__":
       
     ''' Prepare dataset and start training '''      
     # Create torch dataset  
-    volumes, labels = load_dataset("./data/processed", 
+    volumes, labels, patients_ids = load_dataset("./data/processed", 
                                    "./data/processed/dataset.json")    
-    dataset = OasisDataset(volumes, labels, my_transform)
+    dataset = OasisDataset(volumes, labels, patients_ids, my_transform)
 
     # Split dataset into train and test...   
     if args.kfolds is None or args.kfolds <= 0:

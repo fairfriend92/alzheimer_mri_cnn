@@ -35,9 +35,10 @@ def update_args_from_file(args):
 
 # Save arguements to file
 def save_args_to_file(args, timestamp, outputs_path='./outputs'):
-  final_path = f'{outputs_path}/{timestamp}/params.txt'
+  final_path = f'{outputs_path}/{timestamp}'
+  os.makedirs(final_path, exist_ok=True)
 
-  with open(final_path, "w") as f:
+  with open(f"{final_path}/params.txt", "w") as f:
       for key, value in vars(args).items():
           f.write(f"{key} {value}\n")
 

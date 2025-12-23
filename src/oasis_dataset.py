@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from pathlib import Path
 
 class OasisDataset(Dataset):
-    def __init__(self, volumes, labels, transform=None):
+    def __init__(self, volumes, labels, patients_ids, transform=None):
         self.volumes = volumes
         self.labels = labels
         self.transform = transform
@@ -17,6 +17,7 @@ class OasisDataset(Dataset):
         self.weights = 1. / self.counts
         self.norm_weights = self.counts.sum() / self.counts # Normalized weights
         self.sample_weights = [self.weights[label] for label in labels]
+        self.patients_ids = patients_ids
 
     def __len__(self):
         return len(self.volumes)
@@ -28,7 +29,7 @@ class OasisDataset(Dataset):
             vol = self.transform(vol)
 
         label = torch.tensor(self.labels[idx], dtype=torch.long)
-        return vol, label
+        return vol, label, self.patients_ids[idx]
         
 def load_dataset(processed_dir, dataset_file):
     print("Loading dataset...")
@@ -42,9 +43,10 @@ def load_dataset(processed_dir, dataset_file):
 
     X = []
     y = []
+    subjects_ids = []
 
     for dict in dataset:
-        subject_id = dict["id"]        
+        subject_id = dict["id"]
         npy_file = os.path.join(processed_dir, f"{subject_id}.npy")
         try:
             volume = np.load(npy_file)
@@ -53,10 +55,9 @@ def load_dataset(processed_dir, dataset_file):
             sys.exit(1)        
         X.append(volume)
         y.append(dict["label"])
-    
-    #X = np.array(X)  
-    #y = np.array(y)  
-    return X, y
+        subjects_ids.append(subject_id)        
+  
+    return X, y, subjects_ids
 
 def augment_dataset(volumes, labels, train_idx, test_idx, num_copies, 
                     base_transform=None, aug_test=True):
@@ -88,6 +89,7 @@ def augment_dataset(volumes, labels, train_idx, test_idx, num_copies,
 
     aug_vols = [volumes[i] for i in idx]
     aug_labels = [labels[i]  for i in idx]
+    aug_ids = [patients_ids[i] for i in idx]
 
     done = 0
     for i in minor_idx:
@@ -99,9 +101,11 @@ def augment_dataset(volumes, labels, train_idx, test_idx, num_copies,
             aug = minor_transform(img)
             aug_vols.append(aug.data.numpy()) # Retrieve numpy
             aug_labels.append(1)
+            aug_ids.append(patients_ids[i])
+
         done = done + 1
 
-    aug_ds.append(OasisDataset(aug_vols, aug_labels, base_transform))
+    aug_ds.append(OasisDataset(aug_vols, aug_labels, aug_ids, base_transform))
 
   return aug_ds
         
