@@ -59,7 +59,7 @@ def load_dataset(processed_dir, dataset_file):
   
     return X, y, subjects_ids
 
-def augment_dataset(volumes, labels, train_idx, test_idx, num_copies, 
+def augment_dataset(volumes, labels, patients_ids, train_idx, test_idx, num_copies, 
                     base_transform=None, aug_test=True):
   if aug_test:
     print("Augmenting training and test datasets with transformation.")

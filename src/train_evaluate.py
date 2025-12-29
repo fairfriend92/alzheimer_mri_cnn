@@ -107,12 +107,17 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
             output = model(vol)
 
             # Compute prob for Alzheimer's Disease and predict class
-            prob_ad = torch.softmax(output, dim=1)[:, 1].item
-            pred = int(prob_ad > 0.5)
-
-            # Save in the dictionary the prob and label for this patient
-            patient_probs[patient_id].append(prob_ad)
-            patient_labels[patient_id] = label.item()
+            probs_ad = torch.softmax(output, dim=1)[:, 1]  
+        
+            # Loop over batch to handle different patient_ids
+            for i in range(vol.shape[0]):  # Default batch_size=2
+                prob_ad = probs_ad[i].item()  # Single scalar now
+                pat_id = patient_id[i]        # Single patient_id
+                pat_label = label[i].item()   # Single label
+                
+                # Save in the dictionary the prob and label for this patient
+                patient_probs[pat_id].append(prob_ad)
+                patient_labels[pat_id] = pat_label
 
     # Dictionaries where mean TTA probs and preds are saved
     final_probs, final_preds = {}, {}
@@ -161,7 +166,7 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
     # Print metrics 
     report = classification_report(labels, preds, digits=3, output_dict=True)
     auc_score = roc_auc_score(labels, probs)
-    print("Accuracy:", accuracy)
+    print(f"Accuracy:{accuracy}")
     print(f"AUC: {auc_score:.3f}")
     print(classification_report(labels, preds, digits=3))    
 
@@ -291,7 +296,7 @@ if __name__ == "__main__":
 
       # Augment dataset if needed
       if args.augment and args.augment > 0:
-        aug_ds = augment_dataset(volumes, labels, train_idx, test_idx, 
+        aug_ds = augment_dataset(volumes, labels, patients_ids, train_idx, test_idx, 
                                  args.augment, my_transform, args.aug_test)
         train_ds = aug_ds[0]
         if args.aug_test: test_ds = aug_ds[1]
@@ -303,13 +308,13 @@ if __name__ == "__main__":
       skf = StratifiedKFold(n_splits=args.kfolds, shuffle=True, random_state=42)
       all_folds_metrics = []
       for fold, (train_idx, test_idx) in enumerate(skf.split(volumes, labels)):
-          print(f"\n===== FOLD {fold+1} =====")
+          print(f"\n===== FOLD {fold+1} =====", flush=True)
 
           train_ds = Subset(dataset, train_idx)
           test_ds  = Subset(dataset, test_idx)
           
           if args.augment and args.augment > 0:
-            aug_ds = augment_dataset(volumes, labels, train_idx, test_idx, 
+            aug_ds = augment_dataset(volumes, labels, patients_ids, train_idx, test_idx, 
                                      args.augment, my_transform, args.aug_test)
             train_ds = aug_ds[0]
             if args.aug_test: test_ds = aug_ds[1]
