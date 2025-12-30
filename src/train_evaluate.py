@@ -43,6 +43,8 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
     elif args.net_type == 'medium':
       model = Medium3DCNN().to(device)
     
+    print("Training...")
+
     if args.sampler:
       criterion = nn.CrossEntropyLoss(weight=class_weights)
     else:
@@ -52,8 +54,6 @@ def train_evaluate(train_loader, test_loader, dataset, args, timestamp, fold=Non
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     n_epochs = 10
-    
-    print("Training...")
     
     for epoch in range(n_epochs):        
         model.train() # Enable train mode (useful for dropout and batch normalization)

@@ -1,6 +1,15 @@
 .venv/
-data/
-output/
+
+# Ignore all raw data
+data/raw/
+# Ignore large intermediate files (if any)
+data/processed/*.npy
+# Ignore intermediate databases with patients info
+data/processed/*.json
+# Keep the database with the final results for data analysis 
+!data/processed/oasis.db
+
+outputs/
 __pycache__/
 *.pyc
 *.log
