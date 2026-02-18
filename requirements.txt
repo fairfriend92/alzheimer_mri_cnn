@@ -5,6 +5,7 @@ nibabel
 tqdm
 matplotlib
 seaborn
+scikit-learn
 pandas
 joblib
 scipy

@@ -110,7 +110,7 @@ For reproducible experiments and final analyses, using an input configuration fi
 
 Example:
 ```
-python src/train_evaluate.py --input 19_12_25_1923
+python src/train_evaluate.py --input 18_12_25_1923
 ```
 
 Inputs file should have the .txt extension and should be placed in the inputs folder. Only the name, without the file extension, should be provided, not the path. For examples, take a look at the files in the inputs folder.
