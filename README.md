@@ -1,6 +1,6 @@
 # Alzheimer MRI CNN 
 
-This project implements a 3D convolutional neural network (CNN) for Alzheimer’s disease classification from structural MRI scans (OASIS) and focuses on patient-level analysis, uncertainty estimation, and qualitative inspection of model failures.
+This project implements a 3D convolutional neural network (CNN) for Alzheimer’s disease classification from MRI scans (OASIS) and focuses on patient-level analysis, uncertainty estimation, and qualitative inspection of model failures.
 
 The project supports:
 
@@ -50,7 +50,7 @@ The SQLite database (oasis.db) contains:
 - ground-truth labels
 - model predictions and confidence scores
 
-This design decouples model training from data analysis, allowing notebooks to operate purely on structured data.
+This design decouples model training from data analysis, allowing notebooks to operate purely on meta-data.
 
 ## Notebooks Overview
 
@@ -71,9 +71,9 @@ This design decouples model training from data analysis, allowing notebooks to o
 
 ## Requirements
 
-Python 3.10+
-pip
-(optional) GPU with CUDA support for training
+- Python 3.10+
+- pip
+- (optional) GPU with CUDA support for training
 
 Install dependencies:
 ```
@@ -82,7 +82,7 @@ pip install -r requirements.txt
 
 ## Training and Evaluation Configuration
 
-The training and evaluation pipeline is controlled via command-line arguments passed to train_evaluate.py. These options allow flexible configuration of the model architecture, data preprocessing, augmentation strategy, and evaluation protocol.
+The training and evaluation pipeline is controlled via command-line arguments passed to train_evaluate.py. These options allow flexible configuration of the model architecture, data preprocessing and augmentation strategy.
 For reproducibility and clarity, configurations can be provided either directly via command-line flags or through an input configuration file.
 
 ### Network Architecture
@@ -120,5 +120,4 @@ Inputs file should have the .txt extension and should be placed in the inputs fo
 - Training and evaluation are performed per fold when k-fold cross-validation is enabled.
 - Stored predictions, rather than trained models, constitute the primary output of the pipeline. All downstream analyses operate exclusively on the generated SQLite database.
 - Raw MRI data and large intermediate files are excluded from version control
-- The database contains derived, patient-level data only
 - Notebooks are deterministic given the database state
