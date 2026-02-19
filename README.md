@@ -121,3 +121,9 @@ Inputs file should have the .txt extension and should be placed in the inputs fo
 - Stored predictions, rather than trained models, constitute the primary output of the pipeline. All downstream analyses operate exclusively on the generated SQLite database.
 - Raw MRI data and large intermediate files are excluded from version control
 - Notebooks are deterministic given the database state
+
+## Docker image
+
+This project is also available as docker image:
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/fairfriend92/alzheimer_mri_cnn)](https://hub.docker.com/r/fairfriend92/alzheimer_mri_cnn)
